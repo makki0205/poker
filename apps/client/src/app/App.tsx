@@ -1,5 +1,5 @@
-import type { ServerEvent, TableSnapshot } from '@poker/shared';
-import { useEffect, useRef, useState } from 'react';
+import type { Card, ServerEvent, TableSnapshot } from '@poker/shared';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createTournament, joinAsSpectator, joinTournament, rebuy, startTournament } from '../shared/api';
 import { connectTournamentSocket, type TournamentSocket } from '../shared/ws';
 import { LobbyPage } from '../pages/lobby/LobbyPage';
@@ -19,18 +19,137 @@ interface ResultState {
   rankings: string[];
 }
 
+interface LastHandResultState {
+  handId: string;
+  winners: string[];
+  payouts: Array<{ playerId: string; amount: number }>;
+  board: Card[];
+  winnerHoleCards: Array<{ playerId: string; cards: Card[] }>;
+}
+
+interface UrlState {
+  tournamentId?: string | null;
+  name?: string | null;
+  role?: 'player' | 'spectator' | null;
+}
+
+function replaceUrlState(next: UrlState): void {
+  const url = new URL(window.location.href);
+  const params = url.searchParams;
+
+  if (next.tournamentId === null) {
+    params.delete('tournamentId');
+  } else if (typeof next.tournamentId === 'string') {
+    params.set('tournamentId', next.tournamentId);
+  }
+
+  if (next.name === null) {
+    params.delete('name');
+  } else if (typeof next.name === 'string') {
+    params.set('name', next.name);
+  }
+
+  if (next.role === null) {
+    params.delete('role');
+  } else if (next.role) {
+    params.set('role', next.role);
+  }
+
+  const query = params.toString();
+  const nextUrl = `${url.pathname}${query ? `?${query}` : ''}`;
+  window.history.replaceState({}, '', nextUrl);
+}
+
+function buildJoinLink(tournamentId: string, role: 'player' | 'spectator', name: string): string {
+  const url = new URL(window.location.href);
+  url.searchParams.set('tournamentId', tournamentId);
+  url.searchParams.set('role', role);
+  if (name.trim()) {
+    url.searchParams.set('name', name.trim());
+  } else {
+    url.searchParams.delete('name');
+  }
+  return `${url.origin}${url.pathname}?${url.searchParams.toString()}`;
+}
+
 export function App() {
   const [view, setView] = useState<View>('lobby');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
 
   const [tournamentId, setTournamentId] = useState('');
+  const [playerName, setPlayerName] = useState('');
   const [status, setStatus] = useState('waiting');
   const [session, setSession] = useState<SessionState | null>(null);
   const [snapshot, setSnapshot] = useState<TableSnapshot | null>(null);
+  const [lastHandResult, setLastHandResult] = useState<LastHandResultState | null>(null);
   const [result, setResult] = useState<ResultState | null>(null);
 
   const socketRef = useRef<TournamentSocket | null>(null);
+  const autoJoinDoneRef = useRef(false);
+
+  const playerJoinLink = useMemo(() => {
+    if (!tournamentId) {
+      return '';
+    }
+    return buildJoinLink(tournamentId, 'player', playerName);
+  }, [playerName, tournamentId]);
+
+  const spectatorJoinLink = useMemo(() => {
+    if (!tournamentId) {
+      return '';
+    }
+    return buildJoinLink(tournamentId, 'spectator', playerName);
+  }, [playerName, tournamentId]);
+
+  useEffect(() => {
+    if (autoJoinDoneRef.current) {
+      return;
+    }
+    autoJoinDoneRef.current = true;
+
+    const params = new URLSearchParams(window.location.search);
+    const urlTournamentId = params.get('tournamentId')?.trim() ?? '';
+    const urlName = params.get('name')?.trim() ?? '';
+    const urlRole = params.get('role');
+
+    if (urlTournamentId) {
+      setTournamentId(urlTournamentId);
+    }
+    if (urlName) {
+      setPlayerName(urlName);
+    }
+
+    if (!urlTournamentId || !urlName || (urlRole !== 'player' && urlRole !== 'spectator')) {
+      return;
+    }
+
+    void (async () => {
+      setLoading(true);
+      setMessage('');
+      try {
+        if (urlRole === 'player') {
+          const joined = await joinTournament(urlTournamentId, urlName);
+          setSession({
+            sessionId: joined.sessionId,
+            role: 'player',
+            playerId: joined.playerId
+          });
+        } else {
+          const joined = await joinAsSpectator(urlTournamentId, urlName);
+          setSession({
+            sessionId: joined.sessionId,
+            role: 'spectator'
+          });
+        }
+        setView('table');
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : 'Failed to auto join from URL');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     if (!session || !tournamentId) {
@@ -68,6 +187,17 @@ export function App() {
       return;
     }
 
+    if (event.type === 'hand.finished') {
+      setLastHandResult({
+        handId: event.payload.handId,
+        winners: event.payload.winners,
+        payouts: event.payload.payouts,
+        board: event.payload.board,
+        winnerHoleCards: event.payload.winnerHoleCards
+      });
+      return;
+    }
+
     if (event.type === 'error') {
       setMessage(`${event.payload.code}: ${event.payload.message}`);
     }
@@ -91,6 +221,11 @@ export function App() {
       });
       setTournamentId(created.tournamentId);
       setStatus(created.status);
+      replaceUrlState({
+        tournamentId: created.tournamentId,
+        name: playerName || null,
+        role: null
+      });
       setMessage(`Tournament created: ${created.tournamentId}`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Failed to create tournament');
@@ -105,10 +240,16 @@ export function App() {
     try {
       const joined = await joinTournament(input.tournamentId, input.name);
       setTournamentId(input.tournamentId);
+      setPlayerName(input.name);
       setSession({
         sessionId: joined.sessionId,
         role: 'player',
         playerId: joined.playerId
+      });
+      replaceUrlState({
+        tournamentId: input.tournamentId,
+        name: input.name,
+        role: 'player'
       });
       setView('table');
     } catch (error) {
@@ -124,8 +265,14 @@ export function App() {
     try {
       const joined = await joinAsSpectator(input.tournamentId, input.name);
       setTournamentId(input.tournamentId);
+      setPlayerName(input.name);
       setSession({
         sessionId: joined.sessionId,
+        role: 'spectator'
+      });
+      replaceUrlState({
+        tournamentId: input.tournamentId,
+        name: input.name,
         role: 'spectator'
       });
       setView('table');
@@ -183,7 +330,18 @@ export function App() {
   }
 
   function backToLobby() {
+    socketRef.current?.close();
+    socketRef.current = null;
+    setSession(null);
+    setSnapshot(null);
+    setLastHandResult(null);
+    setResult(null);
     setView('lobby');
+    replaceUrlState({
+      tournamentId: tournamentId || null,
+      name: playerName || null,
+      role: null
+    });
   }
 
   if (view === 'result' && result) {
@@ -206,6 +364,7 @@ export function App() {
         tournamentId={tournamentId}
         status={status}
         message={message}
+        lastHandResult={lastHandResult}
         onAction={handleAction}
         onRebuy={handleRebuy}
         onBackToLobby={backToLobby}
@@ -222,6 +381,11 @@ export function App() {
       ) : null}
       <LobbyPage
         tournamentId={tournamentId}
+        playerName={playerName}
+        playerJoinLink={playerJoinLink}
+        spectatorJoinLink={spectatorJoinLink}
+        onTournamentIdChange={setTournamentId}
+        onPlayerNameChange={setPlayerName}
         onCreate={handleCreate}
         onJoinPlayer={handleJoinPlayer}
         onJoinSpectator={handleJoinSpectator}

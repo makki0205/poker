@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { ActionType, TableSnapshot } from '../domain/types';
+import type { ActionType, Card, TableSnapshot } from '../domain/types';
 
 export interface PlayerActionEvent {
   type: 'player.action';
@@ -59,6 +59,8 @@ export interface HandFinishedEvent {
     handId: string;
     winners: string[];
     payouts: Array<{ playerId: string; amount: number }>;
+    board: Card[];
+    winnerHoleCards: Array<{ playerId: string; cards: Card[] }>;
   };
 }
 

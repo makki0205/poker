@@ -13,6 +13,7 @@ pnpm-debug.log*
 # Test artifacts
 coverage/
 playwright-report/
+test-results/
 
 # Env
 .env
