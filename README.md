@@ -179,3 +179,7 @@ Node.js（Hono）を使ったサーバーと、Viteを使ったフロントエ�
    - `npm run typecheck`
    - `npm run test`
    - `npm run build`
+
+## 16. CORS設定
+- APIの許可オリジンは `CORS_ORIGINS` で指定可能（カンマ区切り）
+- 例: `CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173`
