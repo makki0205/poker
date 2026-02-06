@@ -2,6 +2,11 @@ import { useState } from 'react';
 
 interface LobbyPageProps {
   tournamentId: string;
+  playerName: string;
+  playerJoinLink: string;
+  spectatorJoinLink: string;
+  onTournamentIdChange: (tournamentId: string) => void;
+  onPlayerNameChange: (name: string) => void;
   onCreate: (input: {
     name: string;
     durationMinutes: 30 | 60 | 90;
@@ -20,17 +25,14 @@ export function LobbyPage(props: LobbyPageProps) {
   const [startingStack, setStartingStack] = useState(20000);
   const [botCount, setBotCount] = useState(2);
 
-  const [joinTournamentId, setJoinTournamentId] = useState(props.tournamentId);
-  const [joinName, setJoinName] = useState('');
-
   return (
-    <main className="page">
-      <section className="card">
+    <main className="page page-lobby">
+      <section className="card lobbyHeroCard">
         <h1>Poker Tournament</h1>
-        <p className="muted">Mobile tournament table (9-max / single table)</p>
+        <p className="muted">Desktop tournament table (9-max / single table)</p>
       </section>
 
-      <section className="card">
+      <section className="card lobbyCreateCard">
         <h2>Create Tournament</h2>
         <label>
           Name
@@ -85,41 +87,58 @@ export function LobbyPage(props: LobbyPageProps) {
         </button>
       </section>
 
-      <section className="card">
+      <section className="card lobbyJoinCard">
         <h2>Join</h2>
         <label>
           Tournament ID
           <input
-            value={joinTournamentId}
-            onChange={(e) => setJoinTournamentId(e.target.value)}
+            value={props.tournamentId}
+            onChange={(e) => props.onTournamentIdChange(e.target.value)}
             placeholder="trn_xxx"
           />
         </label>
 
         <label>
           Name
-          <input value={joinName} onChange={(e) => setJoinName(e.target.value)} placeholder="your name" />
+          <input
+            value={props.playerName}
+            onChange={(e) => props.onPlayerNameChange(e.target.value)}
+            placeholder="your name"
+          />
         </label>
 
         <div className="buttonRow">
           <button
-            disabled={props.loading || !joinTournamentId || !joinName}
-            onClick={() => props.onJoinPlayer({ tournamentId: joinTournamentId, name: joinName })}
+            disabled={props.loading || !props.tournamentId || !props.playerName}
+            onClick={() => props.onJoinPlayer({ tournamentId: props.tournamentId, name: props.playerName })}
           >
             Join as Player
           </button>
           <button
-            disabled={props.loading || !joinTournamentId || !joinName}
-            onClick={() => props.onJoinSpectator({ tournamentId: joinTournamentId, name: joinName })}
+            disabled={props.loading || !props.tournamentId || !props.playerName}
+            onClick={() => props.onJoinSpectator({ tournamentId: props.tournamentId, name: props.playerName })}
           >
             Join as Spectator
           </button>
         </div>
 
-        <button disabled={props.loading || !joinTournamentId} onClick={() => props.onStart(joinTournamentId)}>
+        <button disabled={props.loading || !props.tournamentId} onClick={() => props.onStart(props.tournamentId)}>
           Start Tournament
         </button>
       </section>
+
+      {props.tournamentId ? (
+        <section className="card lobbyLinksCard">
+          <h2>Join Links</h2>
+          <p className="muted">このリンクを開くと、指定Nameでそのまま参加できます。</p>
+          <a className="joinLink" href={props.playerJoinLink}>
+            Player Link
+          </a>
+          <a className="joinLink" href={props.spectatorJoinLink}>
+            Spectator Link
+          </a>
+        </section>
+      ) : null}
     </main>
   );
 }

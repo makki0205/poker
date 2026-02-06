@@ -7,14 +7,14 @@ interface ResultPageProps {
 
 export function ResultPage(props: ResultPageProps) {
   return (
-    <main className="page">
-      <section className="card">
+    <main className="page page-result">
+      <section className="card resultSummaryCard">
         <h1>Result</h1>
         <p className="muted">Tournament: {props.tournamentId}</p>
         <h2>Winner: {props.winnerPlayerId}</h2>
       </section>
 
-      <section className="card">
+      <section className="card resultRankingCard">
         <h2>Rankings</h2>
         <ol>
           {props.rankings.map((playerId) => (
@@ -23,7 +23,7 @@ export function ResultPage(props: ResultPageProps) {
         </ol>
       </section>
 
-      <section className="card">
+      <section className="card resultFooterCard">
         <button onClick={props.onBackToLobby}>Back to Lobby</button>
       </section>
     </main>

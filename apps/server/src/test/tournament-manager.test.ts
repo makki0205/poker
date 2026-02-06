@@ -94,4 +94,29 @@ describe('TournamentManager', () => {
     expect(rebuy2.rebuyCount).toBe(2);
     expect(rebuy2.newStack).toBe(2000);
   });
+
+  it('allows same player name to rejoin after tournament start', () => {
+    const { manager, store } = setupManager();
+
+    const created = manager.createTournament({
+      name: 't4',
+      durationMinutes: 60,
+      maxSeats: 9,
+      startingStack: 2000,
+      botCount: 0
+    });
+
+    const first = manager.joinPlayer(created.tournamentId, 'alice');
+    manager.joinPlayer(created.tournamentId, 'bob');
+    manager.startTournament(created.tournamentId);
+
+    manager.onDisconnect(first.sessionId);
+    const rejoined = manager.joinPlayer(created.tournamentId, 'alice');
+    const tournament = store.getTournament(created.tournamentId);
+    const player = tournament?.players.find((item) => item.id === first.playerId);
+
+    expect(rejoined.playerId).toBe(first.playerId);
+    expect(rejoined.seatNo).toBe(first.seatNo);
+    expect(player?.connected).toBe(true);
+  });
 });

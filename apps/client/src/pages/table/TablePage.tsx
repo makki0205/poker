@@ -8,6 +8,13 @@ interface TablePageProps {
   tournamentId: string;
   status: string;
   message?: string;
+  lastHandResult: {
+    handId: string;
+    winners: string[];
+    payouts: Array<{ playerId: string; amount: number }>;
+    board: Card[];
+    winnerHoleCards: Array<{ playerId: string; cards: Card[] }>;
+  } | null;
   onAction: (action: ActionType, amount: number) => void;
   onRebuy: () => void;
   onBackToLobby: () => void;
@@ -36,8 +43,13 @@ function cardClass(card: Card): string {
   return 'chip';
 }
 
+function seatPositionClass(seatNo: number): string {
+  return `seat-pos-${seatNo}`;
+}
+
 export function TablePage(props: TablePageProps) {
   const [betAmount, setBetAmount] = useState(0);
+  const [winnerFlashIds, setWinnerFlashIds] = useState<string[]>([]);
   const snapshot = props.snapshot;
 
   const me = useMemo(
@@ -53,10 +65,17 @@ export function TablePage(props: TablePageProps) {
   const myCurrentBet = me?.currentBet ?? 0;
   const myStack = me?.stack ?? 0;
   const toCall = Math.max(0, highestBet - myCurrentBet);
+  const hasExistingBet = highestBet > 0;
+  const canCheck = toCall === 0;
+  const canCall = toCall > 0;
   const maxActionTo = myCurrentBet + myStack;
   const suggestedMinTo = snapshot?.minRaiseTo ?? (highestBet > 0 ? highestBet + Math.max(1, toCall) : 1);
   const sliderMin = Math.min(maxActionTo, Math.max(1, suggestedMinTo));
   const sliderMax = Math.max(sliderMin, maxActionTo);
+  const canRaise = hasExistingBet && typeof snapshot?.minRaiseTo === 'number' && sliderMax >= snapshot.minRaiseTo;
+  const canAggressiveAction = hasExistingBet ? canRaise : myStack > 0;
+  const aggressiveLabel = hasExistingBet ? 'Raise' : 'Bet';
+  const aggressiveActionType: ActionType = hasExistingBet ? 'raise' : 'bet';
 
   useEffect(() => {
     if (!Number.isFinite(sliderMin)) {
@@ -70,7 +89,44 @@ export function TablePage(props: TablePageProps) {
     });
   }, [sliderMin, sliderMax]);
 
+  useEffect(() => {
+    if (!props.lastHandResult?.winners.length) {
+      return;
+    }
+    setWinnerFlashIds(props.lastHandResult.winners);
+    const timer = window.setTimeout(() => setWinnerFlashIds([]), 2500);
+    return () => window.clearTimeout(timer);
+  }, [props.lastHandResult?.handId, props.lastHandResult?.winners]);
+
   const isMyTurn = Boolean(snapshot && props.playerId && snapshot.currentActorId === props.playerId);
+  const seatNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    snapshot?.seats.forEach((seat) => map.set(seat.playerId, seat.name));
+    return map;
+  }, [snapshot]);
+
+  const payoutRows = useMemo(() => {
+    if (!props.lastHandResult) {
+      return [];
+    }
+    return props.lastHandResult.payouts
+      .slice()
+      .sort((a, b) => b.amount - a.amount)
+      .map((row) => ({
+        ...row,
+        name: seatNameMap.get(row.playerId) ?? row.playerId
+      }));
+  }, [props.lastHandResult, seatNameMap]);
+
+  const winnerCardRows = useMemo(() => {
+    if (!props.lastHandResult) {
+      return [];
+    }
+    return props.lastHandResult.winnerHoleCards.map((row) => ({
+      ...row,
+      name: seatNameMap.get(row.playerId) ?? row.playerId
+    }));
+  }, [props.lastHandResult, seatNameMap]);
 
   function quickAmount(rate: number): number {
     const target = myCurrentBet + Math.floor(myStack * rate);
@@ -78,8 +134,8 @@ export function TablePage(props: TablePageProps) {
   }
 
   return (
-    <main className="page">
-      <section className="card card-topline">
+    <main className="page page-table">
+      <section className="card card-topline tableHeaderCard">
         <h1>Table</h1>
         <p className="muted">Tournament: {props.tournamentId}</p>
         <p className="muted">
@@ -88,50 +144,99 @@ export function TablePage(props: TablePageProps) {
         {props.message ? <p className="error">{props.message}</p> : null}
       </section>
 
-      <section className="card tableArena">
-        <div className="potBadge">Pot {snapshot?.pot ?? 0}</div>
-        <h2>Board</h2>
-        <div className="cards boardCards">
-          {snapshot?.board.length ? (
-            snapshot.board.map((card, idx) => (
-              <span
-                className={cardClass(card)}
-                style={{ animationDelay: `${idx * 80}ms` }}
-                key={`${idx}-${card.rank}-${card.suit}`}
-              >
-                {renderCard(card)}
-              </span>
-            ))
-          ) : (
-            <span className="muted">No community cards yet</span>
-          )}
-        </div>
-      </section>
+      {props.lastHandResult ? (
+        <section className="card handResultCard tableResultCard">
+          <h2>Last Hand Result</h2>
+          <p className="muted">Hand: {props.lastHandResult.handId}</p>
+          <p className="resultWinners">
+            Winner:{' '}
+            {props.lastHandResult.winners
+              .map((winnerId) => seatNameMap.get(winnerId) ?? winnerId)
+              .join(', ')}
+          </p>
+          <div className="resultPayoutList">
+            {payoutRows.map((row) => (
+              <div key={`${row.playerId}-${row.amount}`} className="resultPayoutRow">
+                <span>{row.name}</span>
+                <strong>+{row.amount}</strong>
+              </div>
+            ))}
+          </div>
+          {props.lastHandResult.board.length > 0 ? (
+            <>
+              <p className="muted">Board</p>
+              <div className="cards">
+                {props.lastHandResult.board.map((card, idx) => (
+                  <span className={cardClass(card)} key={`result-board-${idx}-${card.rank}-${card.suit}`}>
+                    {renderCard(card)}
+                  </span>
+                ))}
+              </div>
+            </>
+          ) : null}
+          {winnerCardRows.length > 0 ? (
+            <div className="winnerHands">
+              {winnerCardRows.map((row) => (
+                <div key={`winner-cards-${row.playerId}`} className="winnerHandRow">
+                  <span className="winnerName">{row.name}</span>
+                  <div className="cards">
+                    {row.cards.map((card, idx) => (
+                      <span className={cardClass(card)} key={`${row.playerId}-${idx}-${card.rank}-${card.suit}`}>
+                        {renderCard(card)}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
-      <section className="card">
-        <h2>Players</h2>
-        <div className="seatList">
+      <section className="card tableArena tableMapCard">
+        <h2>Table Positions</h2>
+        <div className="tableMap">
+          <div className="tableCenter">
+            <div className="potBadge">Pot {snapshot?.pot ?? 0}</div>
+            <div className="cards boardCards">
+              {snapshot?.board.length ? (
+                snapshot.board.map((card, idx) => (
+                  <span
+                    className={cardClass(card)}
+                    style={{ animationDelay: `${idx * 80}ms` }}
+                    key={`${idx}-${card.rank}-${card.suit}`}
+                  >
+                    {renderCard(card)}
+                  </span>
+                ))
+              ) : (
+                <span className="muted">No community cards yet</span>
+              )}
+            </div>
+          </div>
+
           {snapshot?.seats.map((seat) => {
             const turnClass = snapshot.currentActorId === seat.playerId ? 'is-turn' : '';
             const meClass = props.playerId === seat.playerId ? 'is-me' : '';
+            const winnerClass = winnerFlashIds.includes(seat.playerId) ? 'is-winner' : '';
 
             return (
-              <article className={`seat ${turnClass} ${meClass}`.trim()} key={seat.playerId}>
-                <header className="seatHead">
-                  <strong>
-                    #{seat.seatNo} {seat.name} {seat.isBot ? '(BOT)' : ''}
-                  </strong>
-                  {seat.isDealer ? <p className="badge">Dealer</p> : null}
-                </header>
-                <p>Stack: {seat.stack}</p>
-                <p>Status: {seat.status}</p>
-                <p>Bet: {seat.currentBet}</p>
-                <div className="cards">
+              <article
+                className={`tableSeat ${seatPositionClass(seat.seatNo)} ${turnClass} ${meClass} ${winnerClass}`.trim()}
+                key={seat.playerId}
+              >
+                <p className="tableSeatName">
+                  #{seat.seatNo} {seat.name} {seat.isBot ? '(BOT)' : ''}
+                </p>
+                <p className="tableSeatMeta">Stack: {seat.stack}</p>
+                <p className="tableSeatMeta">Bet: {seat.currentBet}</p>
+                {seat.isDealer ? <p className="badge">Dealer</p> : null}
+                <div className="cards tableSeatCards">
                   {seat.holeCards?.map((card, idx) => (
                     <span className={cardClass(card)} key={`${seat.playerId}-${idx}-${card.rank}-${card.suit}`}>
                       {renderCard(card)}
                     </span>
-                  )) ?? <span className="muted">Hidden</span>}
+                  )) ?? <span className="hiddenTag">Hidden</span>}
                 </div>
               </article>
             );
@@ -139,8 +244,21 @@ export function TablePage(props: TablePageProps) {
         </div>
       </section>
 
+      {me?.holeCards ? (
+        <section className="card tableMyHandCard">
+          <h2>My Hand</h2>
+          <div className="cards">
+            {me.holeCards.map((card, idx) => (
+              <span className={cardClass(card)} key={`${idx}-${card.rank}-${card.suit}`}>
+                {renderCard(card)}
+              </span>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       {props.role === 'player' ? (
-        <section className="card actionsCard">
+        <section className="card actionsCard tableActionsCard">
           <h2>Actions</h2>
           <p className="muted turnLabel">{isMyTurn ? 'Your turn' : 'Waiting for your turn'}</p>
 
@@ -151,76 +269,78 @@ export function TablePage(props: TablePageProps) {
           </div>
 
           <div className="buttonRow">
-            <button disabled={!isMyTurn} onClick={() => props.onAction('fold', 0)}>
-              Fold
-            </button>
-            <button disabled={!isMyTurn} onClick={() => props.onAction('check', 0)}>
-              Check
-            </button>
-            <button disabled={!isMyTurn} onClick={() => props.onAction('call', 0)}>
-              Call
-            </button>
-            <button disabled={!isMyTurn} onClick={() => props.onAction('allin', 0)}>
-              All-in
+            {canCall ? (
+              <button disabled={!isMyTurn} onClick={() => props.onAction('fold', 0)}>
+                Fold
+              </button>
+            ) : null}
+            <button disabled={!isMyTurn} onClick={() => props.onAction(canCheck ? 'check' : 'call', 0)}>
+              {canCheck ? 'Check' : 'Call'}
             </button>
           </div>
 
-          <label>
-            Bet/Raise To: <strong>{betAmount}</strong>
-            <input
-              type="range"
-              min={sliderMin}
-              max={sliderMax}
-              step={1}
-              value={Math.min(sliderMax, Math.max(sliderMin, betAmount))}
-              onChange={(e) => setBetAmount(Number(e.target.value))}
-              disabled={!isMyTurn || myStack <= 0}
-              className="betSlider"
-            />
-            <input
-              type="number"
-              min={sliderMin}
-              max={sliderMax}
-              value={betAmount}
-              onChange={(e) => setBetAmount(Number(e.target.value))}
-              disabled={!isMyTurn || myStack <= 0}
-            />
-          </label>
+          {canAggressiveAction ? (
+            <>
+              <label>
+                {aggressiveLabel} To: <strong>{betAmount}</strong>
+                <input
+                  type="range"
+                  min={sliderMin}
+                  max={sliderMax}
+                  step={1}
+                  value={Math.min(sliderMax, Math.max(sliderMin, betAmount))}
+                  onChange={(e) => setBetAmount(Number(e.target.value))}
+                  disabled={!isMyTurn || myStack <= 0}
+                  className="betSlider"
+                />
+                <input
+                  type="number"
+                  min={sliderMin}
+                  max={sliderMax}
+                  value={betAmount}
+                  onChange={(e) => setBetAmount(Number(e.target.value))}
+                  disabled={!isMyTurn || myStack <= 0}
+                />
+              </label>
 
-          <div className="buttonRow quickRow">
-            <button disabled={!isMyTurn || myStack <= 0} onClick={() => setBetAmount(sliderMin)}>
-              Min
-            </button>
-            <button disabled={!isMyTurn || myStack <= 0} onClick={() => setBetAmount(quickAmount(0.5))}>
-              50%
-            </button>
-            <button disabled={!isMyTurn || myStack <= 0} onClick={() => setBetAmount(quickAmount(0.75))}>
-              75%
-            </button>
-            <button disabled={!isMyTurn || myStack <= 0} onClick={() => setBetAmount(sliderMax)}>
-              Max
-            </button>
-          </div>
+              <div className="buttonRow quickRow">
+                <button disabled={!isMyTurn || myStack <= 0} onClick={() => setBetAmount(sliderMin)}>
+                  Min
+                </button>
+                <button disabled={!isMyTurn || myStack <= 0} onClick={() => setBetAmount(quickAmount(0.5))}>
+                  50%
+                </button>
+                <button disabled={!isMyTurn || myStack <= 0} onClick={() => setBetAmount(quickAmount(0.75))}>
+                  75%
+                </button>
+                <button disabled={!isMyTurn || myStack <= 0} onClick={() => setBetAmount(sliderMax)}>
+                  Max
+                </button>
+              </div>
 
-          <div className="buttonRow">
-            <button disabled={!isMyTurn} onClick={() => props.onAction('bet', betAmount)}>
-              Bet
-            </button>
-            <button disabled={!isMyTurn} onClick={() => props.onAction('raise', betAmount)}>
-              Raise
-            </button>
-          </div>
+              <div className="buttonRow">
+                <button
+                  disabled={!isMyTurn}
+                  onClick={() => props.onAction(aggressiveActionType, betAmount)}
+                >
+                  {aggressiveLabel}
+                </button>
+              </div>
+            </>
+          ) : (
+            <p className="muted">現在のスタックでは{hasExistingBet ? 'レイズ' : 'ベット'}できません。</p>
+          )}
 
           {me && me.stack <= 0 ? <button onClick={props.onRebuy}>Rebuy</button> : null}
         </section>
       ) : (
-        <section className="card">
+        <section className="card tableActionsCard">
           <h2>Spectator</h2>
           <p className="muted">観戦モードのためアクションはできません。</p>
         </section>
       )}
 
-      <section className="card">
+      <section className="card tableFooterCard">
         <button onClick={props.onBackToLobby}>Back to Lobby</button>
       </section>
     </main>

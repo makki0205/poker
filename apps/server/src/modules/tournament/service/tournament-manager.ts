@@ -104,13 +104,8 @@ export class TournamentManager {
 
   joinPlayer(tournamentId: string, name: string): { playerId: string; sessionId: string; seatNo: number } {
     const tournament = this.requireTournament(tournamentId);
-    if (tournament.status !== 'waiting') {
-      throw new Error('Tournament already started');
-    }
 
-    const reconnect = tournament.players.find(
-      (player) => !player.isBot && player.name === name && !player.connected
-    );
+    const reconnect = tournament.players.find((player) => !player.isBot && player.name === name);
 
     let player: PlayerModel;
     if (reconnect) {
@@ -120,6 +115,9 @@ export class TournamentManager {
         player.status = player.stack > 0 ? 'active' : 'busted';
       }
     } else {
+      if (tournament.status !== 'waiting') {
+        throw new Error('Tournament already started');
+      }
       if (tournament.players.length >= tournament.maxSeats) {
         throw new Error('TABLE_FULL');
       }
@@ -310,12 +308,27 @@ export class TournamentManager {
     tournament.handHistory.push(hand);
     tournament.currentHand = null;
 
+    const winnerHoleCards = (hand.winners ?? [])
+      .map((winnerId) => {
+        const handPlayer = hand.players.find((p) => p.playerId === winnerId);
+        if (!handPlayer) {
+          return null;
+        }
+        return {
+          playerId: winnerId,
+          cards: handPlayer.holeCards
+        };
+      })
+      .filter((item): item is { playerId: string; cards: HandModel['players'][number]['holeCards'] } => Boolean(item));
+
     const finishEvent: HandFinishedEvent = {
       type: 'hand.finished',
       payload: {
         handId: hand.id,
         winners: hand.winners ?? [],
-        payouts: hand.payouts ?? []
+        payouts: hand.payouts ?? [],
+        board: hand.board,
+        winnerHoleCards
       }
     };
     this.sink.publishToTournament(tournament.id, finishEvent);
