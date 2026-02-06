@@ -1,0 +1,16 @@
+{
+  "name": "poker-tournament",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:server": "npm --workspace @poker/server run dev",
+    "dev:client": "npm --workspace @poker/client run dev",
+    "build": "npm run --workspaces --if-present build",
+    "test": "npm run --workspaces --if-present test",
+    "typecheck": "npm run --workspaces --if-present typecheck"
+  }
+}
